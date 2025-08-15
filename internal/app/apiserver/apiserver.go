@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/shikidy/golang-rest/internal/app/store"
 	"github.com/sirupsen/logrus"
 )
 
@@ -11,6 +12,7 @@ type ApiServer struct {
 	config *Config
 	logger *logrus.Logger
 	router *http.ServeMux
+	store  *store.Store
 }
 
 func New(config *Config) *ApiServer {
@@ -27,6 +29,9 @@ func (a *ApiServer) Start() error {
 	}
 	a.configureRouter()
 
+	if err := a.configureStore(); err != nil {
+		return err
+	}
 	a.logger.Info("starting api server")
 	return http.ListenAndServe(a.config.BindAddr, a.router)
 }
@@ -38,6 +43,15 @@ func (a *ApiServer) configureLogger() error {
 	}
 	a.logger.SetLevel(level)
 
+	return nil
+}
+
+func (a *ApiServer) configureStore() error {
+	st := store.New(a.config.Store)
+
+	if err := st.Open(); err != nil {
+		return err
+	}
 	return nil
 }
 
