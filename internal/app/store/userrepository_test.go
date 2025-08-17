@@ -30,9 +30,7 @@ func TestUserRepository_FindByEmail(t *testing.T) {
 
 	assert.Error(t, err)
 
-	s.User().Create(&model.User{
-		Email: email,
-	})
+	s.User().Create(model.TestUser(t))
 
 	u, err := s.User().FindByEmail(email)
 
