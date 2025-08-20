@@ -1,6 +1,7 @@
 package apiserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,13 +12,16 @@ import (
 )
 
 const (
-	sessionName = "somename"
+	sessionName        = "somename"
+	ctxKeyUser  ctxKey = iota
 )
 
 var (
 	errIncorrectEmailOrPassword = errors.New("incorrect email or password")
+	errNotAuthenticated         = errors.New("not authenticated")
 )
 
+type ctxKey int8
 type server struct {
 	router       *http.ServeMux
 	store        store.Store
@@ -42,7 +46,19 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *server) configureRouter() {
 	s.router.HandleFunc("POST /users", s.handleUsersCreate())
 	s.router.HandleFunc("POST /sessions", s.handleSessionsCreate())
+
+	private := http.NewServeMux()
+	private.Handle("POST /whoami", s.authenticateUser(s.handleWhoami()))
+
+	s.router.Handle("/private/", http.StripPrefix("/private", private))
 }
+
+func (s *server) handleWhoami() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.respond(w, r, http.StatusOK, r.Context().Value(ctxKeyUser).(*model.User))
+	}
+}
+
 func (s *server) handleSessionsCreate() http.HandlerFunc {
 	type request struct {
 		Email    string `json:"email"`
@@ -73,6 +89,29 @@ func (s *server) handleSessionsCreate() http.HandlerFunc {
 		}
 		s.respond(w, r, http.StatusOK, nil)
 	}
+}
+
+func (s *server) authenticateUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, err := s.sessionStore.Get(r, sessionName)
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		id, ok := session.Values["user_id"]
+		if !ok {
+			s.error(w, r, http.StatusUnauthorized, errNotAuthenticated)
+			return
+		}
+		u, err := s.store.User().Find(id.(int))
+		if err != nil {
+			s.error(w, r, http.StatusUnauthorized, errNotAuthenticated)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyUser, u)))
+
+	})
 }
 
 func (s *server) handleUsersCreate() http.HandlerFunc {
